@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    cursor: none;
+  }
+}
+
+/* Custom cursor styles */
+.custom-cursor {
+  @apply fixed w-6 h-6 rounded-full bg-primary/30 backdrop-blur-sm pointer-events-none z-50 mix-blend-difference;
+  transform: translate(-50%, -50%);
+}
+
+.cursor-dot {
+  @apply fixed w-2 h-2 rounded-full bg-primary pointer-events-none z-50;
+  transform: translate(-50%, -50%);
+}
+
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
