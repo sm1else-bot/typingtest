@@ -21,15 +21,11 @@ export function ModeSelect({ value, onValueChange }: Props) {
             value={mode.id}
             className="flex-1 relative overflow-hidden"
           >
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
-            >
+            <div className="relative z-10">
               <div className="font-bold">{mode.label}</div>
               <div className="text-xs opacity-70">{mode.desc}</div>
-            </motion.div>
-            
+            </div>
+
             {value === mode.id && (
               <motion.div
                 layoutId="activeTab"

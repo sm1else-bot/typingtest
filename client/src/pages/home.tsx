@@ -15,17 +15,18 @@ export default function Home() {
 
       <main className="container mx-auto px-4 py-8 relative z-10">
         <h1 className="text-4xl font-bold text-center mb-8 text-primary flex items-center justify-center gap-2">
-          <span>Test your Typing - TLW/UI</span>
+          <span>Typing Test</span>
           <span role="img" aria-label="keyboard" className="text-3xl">⌨️</span>
         </h1>
 
         <div className="max-w-3xl mx-auto">
           <ModeSelect value={mode} onValueChange={setMode} />
           <div className="mt-8">
-            <TypingTest mode={mode} />
+            <TypingTest key={mode} mode={mode} />
           </div>
         </div>
       </main>
+      <footer className="relative z-10 text-center text-xs text-muted-foreground pb-6">By Jessenth Ebenezer</footer>
     </div>
   );
 }

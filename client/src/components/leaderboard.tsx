@@ -1,37 +1,41 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { readBests } from "@/lib/personal-bests";
 import type { GameMode } from "@shared/schema";
-import { motion } from "framer-motion";
-
-interface Props {
-  mode: GameMode;
-}
-
-export function Leaderboard({ mode }: Props) {
-  const { data: scores } = useQuery({
-    queryKey: ["/api/scores", mode],
-  });
-
+export function PersonalBests({ mode }: { mode: GameMode }) {
+  const [records] = useState(() => readBests());
+  const scores = records
+    .filter((r) => r.mode === mode)
+    .sort((a, b) => a.duration - b.duration);
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-primary">High Scores</CardTitle>
+        <CardTitle className="text-primary text-lg">Personal bests</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2">
-          {scores?.map((score, i) => (
-            <motion.div
-              key={score.id}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="flex justify-between p-2 bg-accent/10 rounded"
-            >
-              <span className="font-mono">{score.initials}</span>
-              <span className="font-bold">{score.wpm} WPM</span>
-            </motion.div>
-          ))}
-        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          Saved in this browser only. Not a global leaderboard.
+        </p>
+        {scores.length ? (
+          <ul className="space-y-2">
+            {scores.map((score) => (
+              <li
+                key={score.duration}
+                className="flex justify-between gap-2 text-sm"
+              >
+                <span>{score.duration}s</span>
+                <span>
+                  {Math.round(score.netWpm)} net WPM ·{" "}
+                  {Math.round(score.accuracy)}%
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Complete a test to save your first result.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

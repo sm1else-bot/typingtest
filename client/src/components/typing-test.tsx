@@ -1,206 +1,257 @@
-import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { calculateWPM, calculateAccuracy } from "@/lib/typing";
-import type { GameMode } from "@shared/schema";
-import { motion } from "framer-motion";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  applyInput,
+  advanceSession,
+  createSession,
+  statistics,
+  type Session,
+} from "@/lib/typing";
+import { getRandomText } from "@/lib/passages";
+import { saveBest } from "@/lib/personal-bests";
+import { PersonalBests } from "./leaderboard";
+import type { GameMode, Duration } from "@shared/schema";
 
-interface Props {
-  mode: GameMode;
-}
-
-export function TypingTest({ mode }: Props) {
-  const [timeOption, setTimeOption] = useState(30);
-  const [timeLeft, setTimeLeft] = useState(timeOption);
-  const [isActive, setIsActive] = useState(false);
-  const [typed, setTyped] = useState("");
-  const [fullTyped, setFullTyped] = useState(""); // Track full typed text for accuracy
+export function TypingTest({ mode }: { mode: GameMode }) {
+  const [duration, setDuration] = useState<Duration>(30);
+  const [session, setSession] = useState<Session>(() => createSession("", 30));
+  const current = useRef(session),
+    textareaRef = useRef<HTMLTextAreaElement>(null),
+    passageRef = useRef<HTMLDivElement>(null);
+  const [now, setNow] = useState(() => performance.now());
   const [showResults, setShowResults] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const { data: textData, refetch } = useQuery({
-    queryKey: [`/api/text/${mode}`],
-    enabled: false,
-  });
-
-  const targetText = textData?.text || "";
-
-  const scoreMutation = useMutation({
-    mutationFn: async (score: any) => {
-      const response = await apiRequest("POST", "/api/scores", score);
-      queryClient.invalidateQueries({ queryKey: ["/api/scores", mode] });
-      return response;
-    },
-  });
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isActive && timeLeft > 0) {
-      interval = setInterval(() => setTimeLeft(t => t - 1), 1000);
-    } else if (timeLeft === 0 && isActive) {
-      setIsActive(false);
-      setShowResults(true);
-    }
-    return () => clearInterval(interval);
-  }, [isActive, timeLeft]);
-
-  const startTest = async () => {
-    await refetch();
-    setTimeLeft(timeOption);
-    setTyped("");
-    setFullTyped("");
-    setIsActive(true);
+  const [bestVersion, setBestVersion] = useState(0);
+  const [storageWarning, setStorageWarning] = useState(false);
+  const saved = useRef(false);
+  function publish(next: Session, time: number) {
+    current.current = next;
+    setSession(next);
+    setNow(time);
+  }
+  function reset(nextDuration = duration, arm = false) {
+    saved.current = false;
     setShowResults(false);
-    textareaRef.current?.focus();
-  };
-
-  const cancelTest = () => {
-    setIsActive(false);
-    setTyped("");
-    setFullTyped("");
-    setTimeLeft(timeOption);
-  };
-
-  const handleTyping = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (!isActive) return;
-
-    const newValue = e.target.value;
-    if (newValue.endsWith(" ")) {
-      // When space is pressed, update full typed text and clear input
-      setFullTyped(prev => prev + newValue);
-      setTyped("");
-    } else {
-      setTyped(newValue);
-    }
-  };
-
-  // Combine current typed text with previously typed text for accuracy calculation
-  const completeTypedText = fullTyped + typed;
-  const wpm = calculateWPM(completeTypedText, timeOption - timeLeft);
-  const accuracy = calculateAccuracy(targetText, completeTypedText);
-
-  const saveScore = async (initials: string) => {
-    await scoreMutation.mutateAsync({
-      initials,
-      wpm,
-      accuracy,
-      mode,
-    });
-  };
-
+    publish(
+      createSession(arm ? getRandomText(mode, nextDuration) : "", nextDuration),
+      performance.now(),
+    );
+    if (arm)
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+        if (passageRef.current) passageRef.current.scrollTop = 0;
+      });
+  }
+  // Timer callbacks only sample the monotonic deadline; they never increment elapsed time.
+  useEffect(() => {
+    if (session.status !== "running") return;
+    const tick = () => {
+      const time = performance.now();
+      publish(advanceSession(current.current, time), time);
+    };
+    const interval = window.setInterval(tick, 50);
+    const deadline = current.current.startedAt! + duration * 1000;
+    const timeout = window.setTimeout(
+      tick,
+      Math.max(0, deadline - performance.now()),
+    );
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+      window.removeEventListener("focus", tick);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [session.status, duration]);
+  useEffect(() => {
+    if (session.status !== "finished" || saved.current) return;
+    saved.current = true;
+    const result = statistics(session, now);
+    setStorageWarning(
+      !saveBest({
+        mode,
+        duration,
+        netWpm: result.netWpm,
+        grossWpm: result.grossWpm,
+        accuracy: result.accuracy,
+        completedAt: new Date().toISOString(),
+      }),
+    );
+    setBestVersion((v) => v + 1);
+    setShowResults(true);
+  }, [session.status, session, now, mode, duration]);
+  const passage = useMemo(() => {
+    const typed = Array.from(session.typed);
+    return session.target ? (
+      Array.from(session.target).map((char, index) => (
+        <span
+          key={index}
+          data-current={index === typed.length}
+          className={
+            typed[index] === undefined
+              ? "text-muted-foreground"
+              : typed[index] === char
+                ? "text-green-400"
+                : "text-red-400 underline decoration-2"
+          }
+        >
+          {char}
+        </span>
+      ))
+    ) : (
+      <span className="text-muted-foreground">
+        Choose a duration, then press Start.
+      </span>
+    );
+  }, [session.target, session.typed]);
+  const result = statistics(session, now);
+  const active = session.target !== "" && session.status !== "finished";
+  useEffect(() => {
+    passageRef.current
+      ?.querySelector("[data-current=true]")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [session.typed.length]);
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
-        {[15, 30, 60].map(time => (
+      <div className="flex gap-2" role="group" aria-label="Test duration">
+        {([15, 30, 60] as Duration[]).map((time) => (
           <Button
             key={time}
-            variant={timeOption === time ? "default" : "outline"}
-            onClick={() => setTimeOption(time)}
-            disabled={isActive}
+            aria-pressed={duration === time}
+            variant={duration === time ? "default" : "outline"}
+            onClick={() => {
+              setDuration(time);
+              reset(time);
+            }}
           >
             {time}s
           </Button>
         ))}
       </div>
-
-      <Card className="relative">
+      <Card>
         <CardContent className="p-4">
-          {/* Target Text Display */}
-          <div className="mb-4 font-mono text-lg">
-            {targetText.split("").map((char, index) => (
-              <span
-                key={index}
-                className={
-                  completeTypedText[index] === undefined
-                    ? "text-muted-foreground"
-                    : completeTypedText[index] === char
-                    ? "text-green-500"
-                    : "text-red-500"
-                }
-              >
-                {char}
-              </span>
-            ))}
+          <div
+            ref={passageRef}
+            data-testid="passage"
+            className="mb-4 font-mono text-lg leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap break-words"
+            aria-label="Text to type"
+          >
+            {passage}
           </div>
-
-          {/* Typing Input */}
+          <label htmlFor="typing-input" className="sr-only">
+            Type the passage
+          </label>
           <textarea
+            id="typing-input"
             ref={textareaRef}
-            value={typed}
-            onChange={handleTyping}
-            disabled={!isActive || !targetText}
+            value={session.typed}
+            onChange={(e) => {
+              const time = performance.now();
+              publish(applyInput(current.current, e.target.value, time), time);
+            }}
+            onPaste={(e) => e.preventDefault()}
+            onDrop={(e) => e.preventDefault()}
+            disabled={!active}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             className="w-full h-32 p-4 font-mono bg-background border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-            placeholder={isActive ? "Start typing..." : "Click Start to begin..."}
+            placeholder={
+              active
+                ? "Timer starts with your first character."
+                : "Press Start to begin."
+            }
           />
-
-          <div className="absolute bottom-4 right-4 flex gap-2">
-            {isActive ? (
-              <Button onClick={cancelTest} variant="destructive">
+          <div className="flex justify-end gap-2 mt-3">
+            {active && (
+              <Button onClick={() => reset()} variant="outline">
                 Cancel
               </Button>
-            ) : (
-              <motion.div animate={{ scale: 1.1 }}>
-                <Button onClick={startTest}>
-                  Start
-                </Button>
-              </motion.div>
             )}
+            <Button onClick={() => reset(duration, true)}>
+              {active || session.status === "finished" ? "Restart" : "Start"}
+            </Button>
           </div>
         </CardContent>
       </Card>
-
-      <Progress value={(timeLeft / timeOption) * 100} />
-
-      <div className="flex justify-between text-sm">
-        <span>Time: {timeLeft}s</span>
-        <span>WPM: {wpm}</span>
-        <span>Accuracy: {accuracy}%</span>
+      <Progress
+        aria-label="Time remaining"
+        value={(result.remaining / duration) * 100}
+      />
+      <div
+        className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm tabular-nums"
+        aria-label="Live statistics"
+      >
+        <span data-testid="time">Time: {Math.ceil(result.remaining)}s</span>
+        <span data-testid="net">Net WPM: {Math.round(result.netWpm)}</span>
+        <span data-testid="gross">
+          Gross WPM: {Math.round(result.grossWpm)}
+        </span>
+        <span data-testid="accuracy">
+          Accuracy: {Math.round(result.accuracy)}%
+        </span>
       </div>
-
+      <details className="text-xs text-muted-foreground">
+        <summary className="cursor-pointer">How scoring works</summary>
+        <p className="mt-2">
+          Five characters, including spaces, equal one word. Gross WPM counts
+          all inserted characters. Net WPM counts correct characters still in
+          your text. Accuracy counts correct insertions out of all attempts;
+          correcting an error does not erase that attempt. Backspaces add no
+          typing credit. Paste is disabled. The timer starts on your first
+          character and continues if you leave the tab.
+        </p>
+      </details>
+      {storageWarning && (
+        <p role="status" className="text-sm">
+          Local storage is unavailable. This result could not be saved.
+        </p>
+      )}
+      <PersonalBests key={`${mode}-${bestVersion}`} mode={mode} />
       <Dialog open={showResults} onOpenChange={setShowResults}>
-        <DialogContent className="max-w-2xl w-full">
-          <DialogHeader className="pb-4">
-            <DialogTitle className="text-3xl font-bold text-center">Test Complete!</DialogTitle>
-            <DialogDescription className="text-xl text-center pt-4">
-              <div className="flex justify-center items-center gap-6">
-                <div className="bg-primary/10 p-4 rounded-lg">
-                  <span className="text-2xl font-bold">{wpm}</span>
-                  <span className="block text-sm">WPM</span>
-                </div>
-                <div className="bg-primary/10 p-4 rounded-lg">
-                  <span className="text-2xl font-bold">{accuracy}%</span>
-                  <span className="block text-sm">Accuracy</span>
-                </div>
-              </div>
+        <DialogContent className="max-w-lg w-[calc(100%-2rem)]">
+          <DialogHeader>
+            <DialogTitle className="text-2xl text-center">
+              Test complete
+            </DialogTitle>
+            <DialogDescription className="text-center">
+              {mode.charAt(0).toUpperCase() + mode.slice(1)} mode ·{" "}
+              {result.elapsed.toFixed(2)} seconds
             </DialogDescription>
           </DialogHeader>
-
-          <div className="flex justify-center gap-6 pt-4">
-            <Button 
-              size="lg" 
-              className="px-8 py-6 text-lg bg-green-600 hover:bg-green-700" 
-              onClick={() => {
-                saveScore("YAY");
-                setShowResults(false);
-              }}
-            >
-              YAY!
-            </Button>
-            <Button 
-              size="lg" 
-              className="px-8 py-6 text-lg bg-red-600 hover:bg-red-700" 
-              onClick={() => {
-                saveScore("NAY");
-                setShowResults(false);
-              }}
-            >
-              NAY!
-            </Button>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <strong className="text-2xl">{Math.round(result.netWpm)}</strong>
+              <span className="block text-xs">Net WPM</span>
+            </div>
+            <div>
+              <strong className="text-2xl">
+                {Math.round(result.grossWpm)}
+              </strong>
+              <span className="block text-xs">Gross WPM</span>
+            </div>
+            <div>
+              <strong className="text-2xl">
+                {Math.round(result.accuracy)}%
+              </strong>
+              <span className="block text-xs">Accuracy</span>
+            </div>
           </div>
+          <p className="text-xs text-muted-foreground text-center">
+            {result.correct} correct characters · {result.incorrect} uncorrected
+            errors · {result.attempts} insertion attempts
+          </p>
+          <Button onClick={() => reset(duration, true)}>Try again</Button>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,0 +1,27 @@
+name: Check Typing Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check && npm test && npm run build
+      - name: Check the production site in Chrome
+        env:
+          MOZHI_TEST_BROWSER: /usr/bin/google-chrome
+          SITE_URL: http://127.0.0.1:4173/
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 &
+          for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          npm run test:browser

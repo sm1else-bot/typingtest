@@ -1,9 +1,5 @@
-import type { Express } from "express";
-import { createServer } from "http";
-import { storage } from "./storage";
-import { insertScoreSchema } from "@shared/schema";
-
-const texts = {
+import type { GameMode } from "@shared/schema";
+export const texts = {
   octopus: [
     `time home play work day new book read write help desk lamp food cook room door open walk talk stop run jump feel good bad old fun game life road car park tree blue red black white green light dark rain snow sun moon star cloud fish bird dog cat boy girl man yes no big small high low top down left right each many much some`,
     `back side move keep take give find look need want tell know see hear play work help make done time home good life day way word book read page door wall open shut desk lamp food room cook walk talk stop game feel hand head foot face body mind heart`,
@@ -43,47 +39,21 @@ const texts = {
     `The quantum mechanical underpinnings of reality present a fascinating paradox: particles existing in superposition until observed, their wave functions collapsing into definite states through the mere act of measurement. This phenomenon, described mathematically through Schrödinger's equations and conceptually through the Copenhagen interpretation, suggests a fundamental interconnectedness between consciousness and the physical world. As we probe deeper into these mysteries, we find ourselves confronting questions that blur the lines between observer and observed, between the quantum realm and our classical understanding of reality.`,
     `The evolution of literary criticism in the post-modern era has led to a profound reconsideration of traditional narrative structures and their relationship to societal power dynamics. Through the lens of deconstructionism, we observe how language itself becomes a battleground for competing interpretations, each text a palimpsest of meanings that simultaneously reveal and obscure deeper truths about the human condition. The author's intent, once considered paramount, now takes its place alongside reader response theory and sociological analysis in a complex web of interpretative frameworks.`,
   ],
-};
+} satisfies Record<GameMode, string[]>;
 
-// Function to fetch appropriate text for each mode
-async function getRandomText(mode: string): Promise<string> {
-  try {
-    const modeTexts = texts[mode as keyof typeof texts];
-    if (!modeTexts) {
-      throw new Error('Invalid mode');
-    }
-    return modeTexts[Math.floor(Math.random() * modeTexts.length)];
-  } catch (error) {
-    throw new Error('Failed to get text');
+export function getRandomText(
+  mode: GameMode,
+  duration: number,
+  random = Math.random,
+): string {
+  const choices = texts[mode];
+  let text = "";
+  while (text.length < duration * 40) {
+    const index = Math.min(
+      choices.length - 1,
+      Math.max(0, Math.floor(random() * choices.length)),
+    );
+    text += (text ? " " : "") + choices[index];
   }
-}
-
-export async function registerRoutes(app: Express) {
-  const httpServer = createServer(app);
-
-  app.get("/api/text/:mode", async (req, res) => {
-    const mode = req.params.mode;
-    try {
-      const text = await getRandomText(mode);
-      res.json({ text });
-    } catch (error) {
-      res.status(400).json({ message: "Failed to fetch text" });
-    }
-  });
-
-  app.get("/api/scores/:mode", async (req, res) => {
-    const scores = await storage.getTopScores(req.params.mode);
-    res.json(scores);
-  });
-
-  app.post("/api/scores", async (req, res) => {
-    const result = insertScoreSchema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({ message: "Invalid score data" });
-    }
-    const score = await storage.createScore(result.data);
-    res.json(score);
-  });
-
-  return httpServer;
+  return text;
 }
